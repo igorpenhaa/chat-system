@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: servera
+  namespace: chat-system
+spec:
+  selector:
+    app: servera
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 50052
+      targetPort: 50052
+
