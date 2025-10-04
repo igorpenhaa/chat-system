@@ -3,10 +3,10 @@ FROM node:20
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install
 
 COPY . /app
-COPY ../chat.proto /app/chat.proto
+#COPY ../chat.proto /app/chat.proto
 
 EXPOSE 50051
 

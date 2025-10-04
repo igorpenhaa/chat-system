@@ -14,13 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgrpc++-dev libgrpc-dev \
+    libgrpc++-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY . /app
-COPY ../chat.proto /app/chat.proto
+#COPY ../chat.proto /app/chat.proto
 
 RUN mkdir -p build && cd build && cmake .. && make -j$(nproc)
 

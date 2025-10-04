@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package chat;
+
+message JoinRequest {
+  string username = 1;
+  string forum_id = 2;
+}
+
+message Message {
+  string username = 1;
+  string forum_id = 2;
+  string text = 3;
+}
+
+message Empty {}
+
+message CheckResponse {
+  bool allowed = 1;
+  string reason = 2;
+}
+
+service ChatServer {
+  rpc JoinForum (JoinRequest) returns (stream Message);
+  rpc SendMessage (Message) returns (Empty);
+}
+
+service Checker {
+  rpc CheckMessage (Message) returns (CheckResponse);
+}
+
