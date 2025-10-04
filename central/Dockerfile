@@ -4,17 +4,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG GRPC_VERSION=1.56.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential autoconf libtool pkg-config cmake git curl wget ca-certificates \
-    lsb-release gnupg \
-    protobuf-compiler \
-    libprotobuf-dev \
-    libssl-dev \
-    python3 \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgrpc++-dev \
+    build-essential autoconf libtool git wget curl apt-utils \
+    libgrpc++-dev libprotobuf-dev libre2-dev pkg-config cmake make \
+    protobuf-compiler libgrpc-dev libprotobuf-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,10 +14,12 @@ WORKDIR /app
 COPY . /app
 #COPY ../chat.proto /app/chat.proto
 
+RUN protoc -I. --cpp_out=. chat.proto
+RUN protoc -I. --grpc_out=. --plugin=protoc-gen-grpc=$(which grpc_cpp_plugin) chat.proto
+
 RUN mkdir -p build && cd build && cmake .. && make -j$(nproc)
 
 WORKDIR /app/build
 
 EXPOSE 8080
 CMD ["./central"]
-
