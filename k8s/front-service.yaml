@@ -4,7 +4,7 @@ metadata:
   name: frontend
   namespace: chat-system
 spec:
-  type: NodePort   # expõe no host para teste
+  type: NodePort
   selector:
     app: frontend
   ports:
