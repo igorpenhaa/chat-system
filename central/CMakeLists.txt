@@ -4,13 +4,17 @@ project(central)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(Protobuf REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GRPC++ REQUIRED grpc++)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(central central.cpp chat.pb.cc chat.grpc.pb.cc)
 
 target_link_libraries(central
-  gRPC::grpc++
-  protobuf::libprotobuf
+  ${GRPC++_LIBRARIES}
+  ${Protobuf_LIBRARIES}
 )
+
+target_include_directories(central PRIVATE ${GRPC++_INCLUDE_DIRS})
+target_compile_options(central PRIVATE ${GRPC++_CFLAGS_OTHER})
