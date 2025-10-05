@@ -15,15 +15,14 @@ O fluxo é:
 ---
 
 ## Pré-requisitos
-
-### Geral
+<!-- ### Geral
 
 * Ubuntu 20.04+ (ou outra distro Linux)
 * CMake 3.10+
 * g++ 10+
 * Node.js 18+
 * Python 3.8+
-* pip
+* pip -->
 
 ### Dependências
 
@@ -34,7 +33,6 @@ O fluxo é:
 nvm use 20
 npm install
 ```
-
 
 #### C++ (Central)
 
