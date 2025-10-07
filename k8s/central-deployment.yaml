@@ -14,9 +14,13 @@ spec:
         app: central
     spec:
       containers:
-      - name: central
-        image: central:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 50051
-
+        - name: central
+          image: central:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVER_A_ADDRESS
+              value: "servera.chat-system.svc.cluster.local:50051"
+            - name: SERVER_B_ADDRESS
+              value: "serverb.chat-system.svc.cluster.local:50052"

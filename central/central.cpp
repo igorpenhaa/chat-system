@@ -301,21 +301,22 @@ public:
 };
 
 int main() {
+    std::string serverAAddr = std::getenv("SERVER_A_ADDRESS") ? std::getenv("SERVER_A_ADDRESS") : "localhost:50051";
+    std::string serverBAddr = std::getenv("SERVER_B_ADDRESS") ? std::getenv("SERVER_B_ADDRESS") : "localhost:50052";
+
     Central central(
-        grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()),
-        grpc::CreateChannel("localhost:50052", grpc::InsecureChannelCredentials())
+        grpc::CreateChannel(serverAAddr, grpc::InsecureChannelCredentials()),
+        grpc::CreateChannel(serverBAddr, grpc::InsecureChannelCredentials())
     );
 
     HTTPServer server(&central);
-
     std::cout << "Starting Central Server..." << std::endl;
     std::cout << "gRPC clients connected to:" << std::endl;
-    std::cout << "  - Server A: localhost:50051" << std::endl;
-    std::cout << "  - Server B: localhost:50052" << std::endl;
-    std::cout << "HTTP API available at: http://localhost:8080" << std::endl;
+    std::cout << "  - Server A: " << serverAAddr << std::endl;
+    std::cout << "  - Server B: " << serverBAddr << std::endl;
+    std::cout << "HTTP API available at: http://0.0.0.0:8080" << std::endl;
 
     server.start(8080);
-
     return 0;
 }
 

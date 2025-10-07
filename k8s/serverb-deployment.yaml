@@ -18,5 +18,5 @@ spec:
         image: serverb:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 50053
+        - containerPort: 50052
 

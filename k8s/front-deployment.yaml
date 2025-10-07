@@ -14,9 +14,12 @@ spec:
         app: frontend
     spec:
       containers:
-      - name: frontend
-        image: frontend:latest
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 3000
+        - name: frontend
+          image: frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: VITE_API_BASE_URL
+              value: "http://192.168.49.2:32080/api"
 
