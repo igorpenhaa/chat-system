@@ -1,0 +1,28 @@
+1) kubectl delete namespace chat-system
+2) minikube stop
+3) minikube delete
+4) minikube start
+5) kubectl create namespace chat-system
+6) eval $(minikube docker-env)
+7) build das imagens no minikube:
+docker build -t frontend:latest ./frontend
+docker build -t servera:latest ./serverA
+docker build -t serverb:latest ./serverB
+docker build -t central:latest ./central
+8) verificar se as imagens foram buildadas:
+minikube ssh
+docker images
+9)
+kubectl apply -f k8s/servera-service.yaml
+kubectl apply -f k8s/serverb-service.yaml
+kubectl apply -f k8s/central-service.yaml
+kubectl apply -f k8s/front-service.yaml
+
+kubectl apply -f k8s/servera-deployment.yaml
+kubectl apply -f k8s/serverb-deployment.yaml
+kubectl apply -f k8s/central-deployment.yaml
+kubectl apply -f k8s/front-deployment.yaml
+10)
+kubectl get pods -n chat-system -o wide
+11)
+minikube service frontend -n chat-system
