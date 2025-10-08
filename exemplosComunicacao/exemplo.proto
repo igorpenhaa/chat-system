@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package exemplo;
+service ExemploService {
+  rpc Dobro (Numero) returns (Resultado) {}
+
+  rpc Tabuada (Numero) returns (stream Resultado) {}
+
+  rpc Media (stream Numero) returns (Resultado) {}
+
+  rpc Conversa (stream Mensagem) returns (stream Mensagem) {}
+}
+
+message Numero {
+  int32 valor = 1;
+}
+
+message Resultado {
+  string mensagem = 1;
+}
+
+message Mensagem {
+  string texto = 1;
+}
+
