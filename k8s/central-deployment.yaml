@@ -4,7 +4,6 @@ metadata:
   name: central
   namespace: chat-system
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: central
@@ -12,6 +11,7 @@ spec:
     metadata:
       labels:
         app: central
+        prometheus: "true"
     spec:
       containers:
         - name: central
@@ -19,6 +19,7 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
+            - containerPort: 8000
           env:
             - name: SERVER_A_ADDRESS
               value: "servera.chat-system.svc.cluster.local:50051"

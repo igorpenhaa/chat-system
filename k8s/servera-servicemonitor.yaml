@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: servera-monitor
+  namespace: chat-system
+  labels:
+    release: kube-prom
+spec:
+  selector:
+    matchLabels:
+      app: servera
+  namespaceSelector:
+    matchNames:
+    - chat-system
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+    scheme: http

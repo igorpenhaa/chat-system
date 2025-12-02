@@ -1,0 +1,29 @@
+# k8s/serverb-servicemonitor.yaml
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: serverb-monitor
+  namespace: chat-system
+  labels:
+    # Este rótulo é crucial! Ele deve corresponder ao seletor configurado
+    # para a instância do Prometheus no kube-prometheus-stack (role: prometheus-k8s)
+    # Por padrão, o stack usa "release: kube-prom"
+    release: kube-prom
+spec:
+  # 1. Selector: Define qual Service será monitorado.
+  # Deve corresponder aos labels do seu Service (app: serverb)
+  selector:
+    matchLabels:
+      app: serverb
+  # 2. Namespace Selector: Define em quais namespaces procurar o Service.
+  # Restringimos ao nosso namespace do projeto.
+  namespaceSelector:
+    matchNames:
+    - chat-system
+  # 3. Endpoints: Define quais portas e caminhos (paths) raspar.
+  endpoints:
+  - port: metrics # O nome da porta que definimos em serverb-service.yaml (Porta 8000)
+    path: /metrics # O endpoint padrão que a prometheus_client usa
+    interval: 15s # Frequência de coleta (a cada 15 segundos)
+    scheme: http

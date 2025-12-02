@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: central
   namespace: chat-system
+  labels:
+    app: central
 spec:
   selector:
     app: central
@@ -13,4 +15,8 @@ spec:
       port: 8080
       targetPort: 8080
       nodePort: 32080
+    - name: metrics
+      protocol: TCP
+      port: 8000
+      targetPort: 8000
 

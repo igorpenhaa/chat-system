@@ -41,6 +41,16 @@ public:
             return false;
         }
 
+		ClientContext ctxA;
+        Empty respA;
+        Status sA = stubA->SendMessage(&ctxA, msg, &respA);
+		if (!sA.ok()) {
+            std::cerr << "Failed to publish to Server A: " << sA.error_message() << std::endl;
+            return false;
+        } else {
+            std::cerr << "Publish to Server A succeeded." << std::endl;
+        }
+ 
         {
             std::lock_guard<std::mutex> lock(messages_mutex);
             forum_messages[msg.forum_id()].push_back({
@@ -62,6 +72,12 @@ public:
             req.set_forum_id(forum_id);
 
             std::unique_ptr<ClientReader<Message>> reader = stubA->JoinForum(&ctx, req);
+            if (!reader) {
+                std::cerr << "[StartForumStream] reader is null immediately after JoinForum" << std::endl;
+                return;
+            }
+            std::cerr << "[StartForumStream] JoinForum returned reader; entering read loop." << std::endl;
+
             Message msg;
             while (reader->Read(&msg)) {
                 std::lock_guard<std::mutex> lock(messages_mutex);
@@ -73,8 +89,11 @@ public:
                 std::cout << "[" << forum_id << "] " << msg.username() << ": " << msg.text() << std::endl;
             }
             Status status = reader->Finish();
-            if (!status.ok()) {
-                std::cerr << "Stream finished with error: " << status.error_message() << std::endl;
+			if (!status.ok()) {
+                std::cerr << "[StartForumStream] Stream finished with error: " << status.error_message()
+                          << " (code=" << status.error_code() << ")" << std::endl;
+            } else {
+                std::cerr << "[StartForumStream] Stream finished OK." << std::endl;
             }
         }).detach();
     }
@@ -167,6 +186,7 @@ private:
 
                 if (!username.empty() && !forum_code.empty()) {
                     std::cout << "User " << username << " joined forum " << forum_code << std::endl;
+					central->StartForumStream(username, forum_code);
 
                     std::string json_response = "{\"success\":true,\"data\":{\"token\":\"user_" + username + "_" + forum_code + "\"}}";
                     std::string response = create_json_response(json_response);

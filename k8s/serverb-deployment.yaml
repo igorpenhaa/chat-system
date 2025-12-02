@@ -4,7 +4,6 @@ metadata:
   name: serverb
   namespace: chat-system
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: serverb
@@ -12,11 +11,13 @@ spec:
     metadata:
       labels:
         app: serverb
+        prometheus: "true"
     spec:
       containers:
       - name: serverb
         image: serverb:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 50052
+        - containerPort: 50052  # Porta gRPC
+        - containerPort: 8000   # Porta das métricas Prometheus
 

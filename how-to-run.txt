@@ -1,7 +1,16 @@
-1) kubectl delete namespace chat-system
+1) 
+kubectl delete namespace chat-system
+kubectl create namespace monitoring
 2) minikube stop
 3) minikube delete
 4) minikube start
+5)
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm install kube-prom prometheus-community/kube-prometheus-stack --namespace monitoring
+kubectl get secret --namespace monitoring kube-prom-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+kubectl port-forward svc/kube-prom-grafana 3000:80 --namespace monitoring
 5) kubectl create namespace chat-system
 6) eval $(minikube docker-env)
 7) build das imagens no minikube:
@@ -22,7 +31,90 @@ kubectl apply -f k8s/servera-deployment.yaml
 kubectl apply -f k8s/serverb-deployment.yaml
 kubectl apply -f k8s/central-deployment.yaml
 kubectl apply -f k8s/front-deployment.yaml
+
+kubectl apply -f k8s/serverb-servicemonitor.yaml
 10)
 kubectl get pods -n chat-system -o wide
+kubectl get pods -n monitoring -o wide
 11)
 minikube service frontend -n chat-system
+12)
+kubectl port-forward svc/kube-prom-prometheus 9090:9090 --namespace monitoring
+
+
+
+# 1) Limpeza total (Garante um ambiente limpo)
+kubectl delete namespace chat-system --ignore-not-found=true
+kubectl delete namespace monitoring --ignore-not-found=true
+minikube stop
+minikube delete
+
+# 2) Inicia o cluster Minikube (com pelo menos 2 Workers para elasticidade futura)
+minikube start --nodes 3 --driver=docker 
+
+# 3) Cria o namespace da aplicação
+kubectl create namespace chat-system
+
+# 4) Configuração do ambiente Docker do Minikube
+eval $(minikube docker-env)
+
+# 5) Build das imagens no Minikube
+docker build -t frontend:latest ./frontend
+docker build -t servera:latest ./serverA
+docker build -t serverb:latest ./serverB 
+docker build -t central:latest ./central
+
+# 6) Opcional: Verificar se as imagens foram buildadas no Minikube
+minikube ssh
+docker images
+exit
+
+# 7) Aplicação dos Manifestos K8S (Serviços e Deployments)
+# Aplica services:
+kubectl apply -f k8s/servera-service.yaml -n chat-system
+kubectl apply -f k8s/serverb-service.yaml -n chat-system
+kubectl apply -f k8s/central-service.yaml -n chat-system
+kubectl apply -f k8s/front-service.yaml -n chat-system
+# Aplica deployments:
+kubectl apply -f k8s/servera-deployment.yaml -n chat-system
+kubectl apply -f k8s/serverb-deployment.yaml -n chat-system
+kubectl apply -f k8s/central-deployment.yaml -n chat-system
+kubectl apply -f k8s/front-deployment.yaml -n chat-system
+
+
+# INSTALAÇÃO DO MONITORAMENTO (PROMETHEUS/GRAFANA)
+
+# 8) Cria o namespace de monitoramento
+kubectl create namespace monitoring
+
+# 9) Configuração e instalação do Kube-Prometheus-Stack via Helm
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install kube-prom prometheus-community/kube-prometheus-stack --namespace monitoring
+# Aguarde alguns minutos até que os pods do monitoring subam (use kubectl get pods -n monitoring)
+
+# 10) Aplicação do ServiceMonitor (Conecta o Prometheus ao Server B)
+kubectl apply -f k8s/serverb-servicemonitor.yaml
+
+# =======================================================
+# PARTE 4: VALIDAÇÃO E ACESSO
+# =======================================================
+
+# 11) Verifica o status dos pods
+echo "Verificando pods do CHAT SYSTEM..."
+kubectl get pods -n chat-system -o wide
+echo "Verificando pods do MONITORING..."
+kubectl get pods -n monitoring -o wide
+
+# 12) Acessar o Frontend (Aplicação)
+minikube service frontend -n chat-system
+
+# 13) Acessar o Grafana (Monitoramento)
+echo "Senha do Grafana:"
+kubectl get secret --namespace monitoring kube-prom-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+# Encaminhar porta do Grafana para acesso local (http://localhost:3000)
+kubectl port-forward svc/kube-prom-grafana 3000:80 --namespace monitoring
+
+# 14) Acessar o Prometheus UI (Verificar Targets)
+# Encaminhar porta do Prometheus para acesso local (http://localhost:9090)
+kubectl port-forward svc/kube-prom-prometheus 9090:9090 --namespace monitoring
