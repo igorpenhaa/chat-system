@@ -50,10 +50,11 @@ minikube stop
 minikube delete
 
 # 2) Inicia o cluster Minikube (com pelo menos 2 Workers para elasticidade futura)
-minikube start --nodes 3 --driver=docker 
+minikube start --nodes 3 --driver=docker
 
 # 3) Cria o namespace da aplicação
 kubectl create namespace chat-system
+kubectl create namespace monitoring
 
 # 4) Configuração do ambiente Docker do Minikube
 eval $(minikube docker-env)
@@ -61,7 +62,7 @@ eval $(minikube docker-env)
 # 5) Build das imagens no Minikube
 docker build -t frontend:latest ./frontend
 docker build -t servera:latest ./serverA
-docker build -t serverb:latest ./serverB 
+docker build -t serverb:latest ./serverB
 docker build -t central:latest ./central
 
 # 6) Opcional: Verificar se as imagens foram buildadas no Minikube
@@ -85,7 +86,6 @@ kubectl apply -f k8s/front-deployment.yaml -n chat-system
 # INSTALAÇÃO DO MONITORAMENTO (PROMETHEUS/GRAFANA)
 
 # 8) Cria o namespace de monitoramento
-kubectl create namespace monitoring
 
 # 9) Configuração e instalação do Kube-Prometheus-Stack via Helm
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -95,6 +95,8 @@ helm install kube-prom prometheus-community/kube-prometheus-stack --namespace mo
 
 # 10) Aplicação do ServiceMonitor (Conecta o Prometheus ao Server B)
 kubectl apply -f k8s/serverb-servicemonitor.yaml
+kubectl apply -f k8s/servera-servicemonitor.yaml
+kubectl apply -f k8s/central-servicemonitor.yaml
 
 # =======================================================
 # PARTE 4: VALIDAÇÃO E ACESSO
@@ -117,4 +119,4 @@ kubectl port-forward svc/kube-prom-grafana 3000:80 --namespace monitoring
 
 # 14) Acessar o Prometheus UI (Verificar Targets)
 # Encaminhar porta do Prometheus para acesso local (http://localhost:9090)
-kubectl port-forward svc/kube-prom-prometheus 9090:9090 --namespace monitoring
+kubectl port-forward svc/kube-prom-prometheus 9090:9090 --namespace monitor

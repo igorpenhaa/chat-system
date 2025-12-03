@@ -12,6 +12,13 @@
 #include <grpcpp/grpcpp.h>
 #include "chat.grpc.pb.h"
 
+#include <chrono>
+// Includes do Prometheus
+#include <prometheus/exposer.h>
+#include <prometheus/registry.h>
+#include <prometheus/counter.h>
+#include <prometheus/histogram.h>
+
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::ClientReader;
@@ -23,15 +30,54 @@ using chat::ChatServer;
 using chat::JoinRequest;
 using chat::Empty;
 
+// =======================================================
+// CONFIGURAÇÃO GLOBAL DO PROMETHEUS
+// =======================================================
+std::shared_ptr<prometheus::Registry> registry = std::make_shared<prometheus::Registry>();
+
+// Buckets manuais para evitar erro de construtor
+const prometheus::Histogram::BucketBoundaries buckets{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
+
+// 1. Latencia HTTP
+prometheus::Family<prometheus::Histogram>& http_request_duration = prometheus::BuildHistogram()
+    .Name("central_http_request_duration_seconds")
+    .Help("Duração das requisições HTTP por rota e status")
+    .Register(*registry);
+
+// 2. Contador gRPC (Total de chamadas de saida)
+prometheus::Family<prometheus::Counter>& grpc_calls_total = prometheus::BuildCounter()
+    .Name("central_grpc_client_calls_total")
+    .Help("Total de chamadas gRPC feitas pelo Gateway para outros serviços")
+    .Register(*registry);
+
+// 3. Latencia gRPC (Tempo de resposta dos servicos backend)
+prometheus::Family<prometheus::Histogram>& grpc_call_duration = prometheus::BuildHistogram()
+    .Name("central_grpc_client_call_duration_seconds")
+    .Help("Duração das chamadas gRPC de saída")
+    .Register(*registry);
+
 class Central {
 public:
     Central(std::shared_ptr<Channel> a, std::shared_ptr<Channel> b)
       : stubA(ChatServer::NewStub(a)), stubB(Checker::NewStub(b)) {}
 
     bool SendMessage(const Message& msg) {
+		// --- CHAMADA AO SERVER B (CHECKER) ---
+        auto start_b = std::chrono::steady_clock::now();
+
         ClientContext ctx;
         CheckResponse resp;
         Status s = stubB->CheckMessage(&ctx, msg, &resp);
+
+		// alteracao
+		auto end_b = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed_b = end_b - start_b;
+        std::string status_label_b = s.ok() ? "OK" : "ERROR";
+
+        // Registra metricas do B
+        grpc_call_duration.Add({{"service", "Checker"}, {"method", "CheckMessage"}, {"status", status_label_b}}, buckets).Observe(elapsed_b.count());
+        grpc_calls_total.Add({{"service", "Checker"}, {"method", "CheckMessage"}, {"status", status_label_b}}).Increment();
+
         if (!s.ok()) {
             std::cerr << "Checker error: " << s.error_message() << std::endl;
             return false;
@@ -41,16 +87,29 @@ public:
             return false;
         }
 
+		// --- CHAMADA AO SERVER A (PUBLISH) ---
+        auto start_a = std::chrono::steady_clock::now();
+
 		ClientContext ctxA;
         Empty respA;
         Status sA = stubA->SendMessage(&ctxA, msg, &respA);
+
+		// altercao
+		auto end_a = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed_a = end_a - start_a;
+        std::string status_label_a = sA.ok() ? "OK" : "ERROR";
+
+        // Registra metricas do A
+        grpc_call_duration.Add({{"service", "ChatServer"}, {"method", "SendMessage"}, {"status", status_label_a}}, buckets).Observe(elapsed_a.count());
+        grpc_calls_total.Add({{"service", "ChatServer"}, {"method", "SendMessage"}, {"status", status_label_a}}).Increment();
+
 		if (!sA.ok()) {
             std::cerr << "Failed to publish to Server A: " << sA.error_message() << std::endl;
             return false;
         } else {
             std::cerr << "Publish to Server A succeeded." << std::endl;
         }
- 
+
         {
             std::lock_guard<std::mutex> lock(messages_mutex);
             forum_messages[msg.forum_id()].push_back({
@@ -66,6 +125,8 @@ public:
 
     void StartForumStream(const std::string& username, const std::string& forum_id) {
         std::thread([this, username, forum_id]() {
+			auto start_stream = std::chrono::steady_clock::now();
+
             ClientContext ctx;
             JoinRequest req;
             req.set_username(username);
@@ -89,6 +150,17 @@ public:
                 std::cout << "[" << forum_id << "] " << msg.username() << ": " << msg.text() << std::endl;
             }
             Status status = reader->Finish();
+
+			// alteracao
+			auto end_stream = std::chrono::steady_clock::now();
+            std::chrono::duration<double> elapsed_stream = end_stream - start_stream;
+            std::string status_label = status.ok() ? "OK" : "ERROR";
+
+            // Registra metricas do Stream (Duracao total da conexao)
+            grpc_call_duration.Add({{"service", "ChatServer"}, {"method", "JoinForum"}, {"status", status_label}}, buckets).Observe(elapsed_stream.count());
+            grpc_calls_total.Add({{"service", "ChatServer"}, {"method", "JoinForum"}, {"status", status_label}}).Increment();
+
+
 			if (!status.ok()) {
                 std::cerr << "[StartForumStream] Stream finished with error: " << status.error_message()
                           << " (code=" << status.error_code() << ")" << std::endl;
@@ -160,6 +232,8 @@ private:
     }
 
     void handle_request(int client_socket) {
+		auto start_http = std::chrono::steady_clock::now();
+
         char buffer[4096] = {0};
         read(client_socket, buffer, 4096);
 
@@ -167,6 +241,9 @@ private:
         std::istringstream request_stream(request);
         std::string method, path, version;
         request_stream >> method >> path >> version;
+
+		// Simplifica a rota removendo query params para o Prometheus
+        std::string route_label = path.substr(0, path.find('?'));
 
         std::cout << "Request: " << method << " " << path << std::endl;
 
@@ -176,6 +253,8 @@ private:
             close(client_socket);
             return;
         }
+
+		int status_code = 200;
 
         if (method == "POST" && path == "/api/forum/join") {
             size_t body_start = request.find("\r\n\r\n");
@@ -192,6 +271,7 @@ private:
                     std::string response = create_json_response(json_response);
                     send(client_socket, response.c_str(), response.length(), 0);
                 } else {
+					status_code = 400;
                     std::string json_response = "{\"success\":false,\"message\":\"Invalid request\"}";
                     std::string response = create_json_response(json_response, 400);
                     send(client_socket, response.c_str(), response.length(), 0);
@@ -219,11 +299,13 @@ private:
                         std::string response = create_json_response(json_response);
                         send(client_socket, response.c_str(), response.length(), 0);
                     } else {
+						status_code = 400;
                         std::string json_response = "{\"success\":false,\"message\":\"Message blocked or failed\"}";
                         std::string response = create_json_response(json_response, 400);
                         send(client_socket, response.c_str(), response.length(), 0);
                     }
                 } else {
+					status_code = 400;
                     std::string json_response = "{\"success\":false,\"message\":\"Invalid message\"}";
                     std::string response = create_json_response(json_response, 400);
                     send(client_socket, response.c_str(), response.length(), 0);
@@ -261,16 +343,26 @@ private:
                 std::string response = create_json_response(json_response.str());
                 send(client_socket, response.c_str(), response.length(), 0);
             } else {
+				status_code = 400;
                 std::string json_response = "{\"success\":false,\"message\":\"Missing forumCode parameter\"}";
                 std::string response = create_json_response(json_response, 400);
                 send(client_socket, response.c_str(), response.length(), 0);
             }
         }
         else {
+			status_code = 400;
             std::string json_response = "{\"success\":false,\"message\":\"Not found\"}";
             std::string response = create_json_response(json_response, 404);
             send(client_socket, response.c_str(), response.length(), 0);
         }
+
+		//alteracao
+		auto end_http = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed_http = end_http - start_http;
+
+        // Registra metrica HTTP
+        http_request_duration.Add({{"route", route_label}, {"method", method}, {"status", std::to_string(status_code)}}, buckets)
+            .Observe(elapsed_http.count());
 
         close(client_socket);
     }
@@ -302,6 +394,12 @@ public:
             std::cerr << "Listen failed" << std::endl;
             return;
         }
+
+		// INICIA O SERVIDOR DE METRICAS (PROMETHEUS)
+        // Isso roda em uma thread separada dentro do Exposer
+        prometheus::Exposer exposer("0.0.0.0:8000");
+        exposer.RegisterCollectable(registry);
+        std::cout << "Prometheus Metrics Exposer running on 0.0.0.0:8000/metrics" << std::endl;
 
         std::cout << "HTTP Server listening on port " << port << std::endl;
 
