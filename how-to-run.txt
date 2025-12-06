@@ -11,19 +11,20 @@ minikube start --nodes 3 --driver=docker
 kubectl create namespace chat-system
 kubectl create namespace monitoring
 
-# 4) Configuração do ambiente Docker do Minikube
-eval $(minikube docker-env)
-
-# 5) Build das imagens no Minikube
-docker build -t frontend:latest ./frontend
-docker build -t servera:latest ./serverA
-docker build -t serverb:latest ./serverB
+# 4) Build no host mesmo
 docker build -t central:latest ./central
+docker build -t frontend:latest ./frontend
+docker build -t servera:latest ./servera
+docker build -t serverb:latest ./serverb
+
+# 5) Load no minikube, isso pode demorar BASTANTE
+minikube image load central:latest
+minikube image load frontend:latest
+minikube image load servera:latest
+minikube image load serverb:latest
 
 # 6) Opcional: Verificar se as imagens foram buildadas no Minikube
-minikube ssh
-docker images
-exit
+minikube image list
 
 # 7) Aplicação dos Manifestos K8S (Serviços e Deployments)
 # Aplica services:
