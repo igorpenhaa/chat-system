@@ -31,7 +31,7 @@ using chat::JoinRequest;
 using chat::Empty;
 
 // =======================================================
-// CONFIGURAÇÃO GLOBAL DO PROMETHEUS
+// CONFIGURACAO GLOBAL DO PROMETHEUS
 // =======================================================
 std::shared_ptr<prometheus::Registry> registry = std::make_shared<prometheus::Registry>();
 
@@ -62,14 +62,12 @@ public:
       : stubA(ChatServer::NewStub(a)), stubB(Checker::NewStub(b)) {}
 
     bool SendMessage(const Message& msg) {
-		// --- CHAMADA AO SERVER B (CHECKER) ---
         auto start_b = std::chrono::steady_clock::now();
 
         ClientContext ctx;
         CheckResponse resp;
         Status s = stubB->CheckMessage(&ctx, msg, &resp);
 
-		// alteracao
 		auto end_b = std::chrono::steady_clock::now();
         std::chrono::duration<double> elapsed_b = end_b - start_b;
         std::string status_label_b = s.ok() ? "OK" : "ERROR";
@@ -87,14 +85,12 @@ public:
             return false;
         }
 
-		// --- CHAMADA AO SERVER A (PUBLISH) ---
         auto start_a = std::chrono::steady_clock::now();
 
 		ClientContext ctxA;
         Empty respA;
         Status sA = stubA->SendMessage(&ctxA, msg, &respA);
 
-		// altercao
 		auto end_a = std::chrono::steady_clock::now();
         std::chrono::duration<double> elapsed_a = end_a - start_a;
         std::string status_label_a = sA.ok() ? "OK" : "ERROR";
@@ -151,7 +147,6 @@ public:
             }
             Status status = reader->Finish();
 
-			// alteracao
 			auto end_stream = std::chrono::steady_clock::now();
             std::chrono::duration<double> elapsed_stream = end_stream - start_stream;
             std::string status_label = status.ok() ? "OK" : "ERROR";
@@ -356,7 +351,6 @@ private:
             send(client_socket, response.c_str(), response.length(), 0);
         }
 
-		//alteracao
 		auto end_http = std::chrono::steady_clock::now();
         std::chrono::duration<double> elapsed_http = end_http - start_http;
 
@@ -396,7 +390,6 @@ public:
         }
 
 		// INICIA O SERVIDOR DE METRICAS (PROMETHEUS)
-        // Isso roda em uma thread separada dentro do Exposer
         prometheus::Exposer exposer("0.0.0.0:8000");
         exposer.RegisterCollectable(registry);
         std::cout << "Prometheus Metrics Exposer running on 0.0.0.0:8000/metrics" << std::endl;

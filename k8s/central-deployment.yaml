@@ -4,6 +4,7 @@ metadata:
   name: central
   namespace: chat-system
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: central

@@ -8,6 +8,7 @@ metadata:
 spec:
   selector:
     app: serverb
+  type: ClusterIP
   ports:
     - name: grpc
       protocol: TCP
@@ -17,4 +18,3 @@ spec:
       protocol: TCP
       port: 8000
       targetPort: 8000
-  type: ClusterIP

@@ -1,4 +1,3 @@
-// serverA/server_a.js
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 const client = require('prom-client');
@@ -8,11 +7,9 @@ const packageDef = protoLoader.loadSync('./chat.proto', {});
 const grpcObject = grpc.loadPackageDefinition(packageDef);
 const chat = grpcObject.chat;
 
-const forums = new Map(); // forumId -> Set of call (ServerWritableStream)
+const forums = new Map();
 
-
-// 1. Definição e Registro das Métricas
-
+// Definicao e Registro das Metricas
 const register = new client.Registry();
 client.collectDefaultMetrics({ register });
 
@@ -28,7 +25,7 @@ const activeConnectionsGauge = new client.Gauge({
 const messageSentCounter = new client.Counter({
     name: 'chat_messages_sent_total',
     help: 'Total number of messages sent (called SendMessage)',
-    labelNames: ['forum_id', 'status'], // Status: success/error
+    labelNames: ['forum_id', 'status'],
     registers: [register],
 });
 
@@ -61,7 +58,7 @@ function JoinForum(call) {
     console.log(`Connection left forum ${forum_id}. remaining: ${forums.get(forum_id).size}`);
   });
 
-  // não fechamos o call — mantemos o stream aberto
+  // nao fechamos o call — mantemos o stream aberto
 }
 
 function SendMessage(call, callback) {
@@ -74,7 +71,6 @@ function SendMessage(call, callback) {
   try {
     if (list) {
       for (const c of Array.from(list)) {
-        // tente escrever; se erro, remova
         try {
           c.write(msg);
         } catch (err) {
@@ -82,7 +78,7 @@ function SendMessage(call, callback) {
         }
       }
     }
-    callback(null, {}); // retorna Empty
+    callback(null, {});
   } catch (err) {
     status = 'error';
     console.error('Error during SendMessage processing:', err);
@@ -95,7 +91,7 @@ function SendMessage(call, callback) {
 }
 
 function main() {
-  // 3. Inicializar o Servidor de Métricas HTTP (Porta 8000)
+  // Inicializar o Servidor de Métricas HTTP (Porta 8000)
   const metricsServer = http.createServer(async (req, res) => {
     if (req.url === '/metrics') {
       res.setHeader('Content-Type', register.contentType);

@@ -6,11 +6,8 @@ from prometheus_client import start_http_server, Counter, Summary
 
 BANNED_WORDS = ["spam", "ofensa", "flamengo"]
 
-# -----------------------------------------------------
-# 1. Definição das Métricas
-# -----------------------------------------------------
-
-# Contador para o total de requisições de checagem
+# Definicao das Metricas
+# Contador para o total de requisicoes de checagem
 REQUEST_COUNT = Counter(
     'checker_requests_total',
     'Total de requisições recebidas pelo Checker (Server B)',
@@ -47,7 +44,6 @@ def serve():
     start_http_server(8000)
     print("Prometheus Metrics Server running on 8000")
 
-    # Inicio do servidor gRPC
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     chat_pb2_grpc.add_CheckerServicer_to_server(Checker(), server)
     server.add_insecure_port('[::]:50052')

@@ -7,7 +7,6 @@ find_package(Protobuf REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GRPC++ REQUIRED grpc++)
 
-# Adiciona o pacote do Prometheus
 find_package(prometheus-cpp REQUIRED)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
