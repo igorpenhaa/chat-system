@@ -4,7 +4,7 @@ metadata:
   name: central
   namespace: chat-system
 spec:
-  replicas: 1
+  replicas: 5
   selector:
     matchLabels:
       app: central
@@ -23,6 +23,6 @@ spec:
             - containerPort: 8000
           env:
             - name: SERVER_A_ADDRESS
-              value: "servera.chat-system.svc.cluster.local:50051"
+              value: "dns:///servera.chat-system.svc.cluster.local:50051"
             - name: SERVER_B_ADDRESS
-              value: "serverb.chat-system.svc.cluster.local:50052"
+              value: "dns:///serverb.chat-system.svc.cluster.local:50052"

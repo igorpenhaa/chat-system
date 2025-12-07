@@ -1,19 +1,16 @@
 #include <iostream>
 #include <memory>
 #include <thread>
-#include <map>
 #include <vector>
-#include <mutex>
+#include <map>
 #include <sstream>
-#include <cstring>
+#include <algorithm>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <grpcpp/grpcpp.h>
 #include "chat.grpc.pb.h"
-
 #include <chrono>
-// Includes do Prometheus
 #include <prometheus/exposer.h>
 #include <prometheus/registry.h>
 #include <prometheus/counter.h>
@@ -21,178 +18,87 @@
 
 using grpc::Channel;
 using grpc::ClientContext;
-using grpc::ClientReader;
 using grpc::Status;
 using chat::Message;
 using chat::Checker;
 using chat::CheckResponse;
 using chat::ChatServer;
-using chat::JoinRequest;
 using chat::Empty;
+using chat::HistoryRequest;
+using chat::HistoryResponse;
 
-// =======================================================
-// CONFIGURACAO GLOBAL DO PROMETHEUS
-// =======================================================
+// Configuração Prometheus
 std::shared_ptr<prometheus::Registry> registry = std::make_shared<prometheus::Registry>();
-
-// Buckets manuais para evitar erro de construtor
 const prometheus::Histogram::BucketBoundaries buckets{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0};
-
-// 1. Latencia HTTP
-prometheus::Family<prometheus::Histogram>& http_request_duration = prometheus::BuildHistogram()
-    .Name("central_http_request_duration_seconds")
-    .Help("Duração das requisições HTTP por rota e status")
-    .Register(*registry);
-
-// 2. Contador gRPC (Total de chamadas de saida)
-prometheus::Family<prometheus::Counter>& grpc_calls_total = prometheus::BuildCounter()
-    .Name("central_grpc_client_calls_total")
-    .Help("Total de chamadas gRPC feitas pelo Gateway para outros serviços")
-    .Register(*registry);
-
-// 3. Latencia gRPC (Tempo de resposta dos servicos backend)
-prometheus::Family<prometheus::Histogram>& grpc_call_duration = prometheus::BuildHistogram()
-    .Name("central_grpc_client_call_duration_seconds")
-    .Help("Duração das chamadas gRPC de saída")
-    .Register(*registry);
+prometheus::Family<prometheus::Histogram>& http_request_duration = prometheus::BuildHistogram().Name("central_http_request_duration_seconds").Help("HTTP Latency").Register(*registry);
 
 class Central {
 public:
     Central(std::shared_ptr<Channel> a, std::shared_ptr<Channel> b)
       : stubA(ChatServer::NewStub(a)), stubB(Checker::NewStub(b)) {}
 
-    bool SendMessage(const Message& msg) {
-        auto start_b = std::chrono::steady_clock::now();
+    bool SendMessage(const std::string& username, const std::string& forum_id, const std::string& text) {
+        // Se o forum_id estiver vazio, rejeita ou define um padrão para evitar mistura de mensagens
+        if (forum_id.empty()) {
+            std::cout << "Erro: Tentativa de enviar mensagem sem forum_id." << std::endl;
+            return false;
+        }
 
         ClientContext ctx;
         CheckResponse resp;
+        Message msg;
+        msg.set_username(username);
+        msg.set_forum_id(forum_id);
+        msg.set_text(text);
+
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        msg.set_timestamp(timestamp);
+
         Status s = stubB->CheckMessage(&ctx, msg, &resp);
-
-		auto end_b = std::chrono::steady_clock::now();
-        std::chrono::duration<double> elapsed_b = end_b - start_b;
-        std::string status_label_b = s.ok() ? "OK" : "ERROR";
-
-        // Registra metricas do B
-        grpc_call_duration.Add({{"service", "Checker"}, {"method", "CheckMessage"}, {"status", status_label_b}}, buckets).Observe(elapsed_b.count());
-        grpc_calls_total.Add({{"service", "Checker"}, {"method", "CheckMessage"}, {"status", status_label_b}}).Increment();
-
-        if (!s.ok()) {
-            std::cerr << "Checker error: " << s.error_message() << std::endl;
-            return false;
-        }
-        if (!resp.allowed()) {
-            std::cout << "Mensagem bloqueada: " << resp.reason() << std::endl;
+        if (!s.ok() || !resp.allowed()) {
+            std::cout << "Message blocked: " << (s.ok() ? resp.reason() : s.error_message()) << std::endl;
             return false;
         }
 
-        auto start_a = std::chrono::steady_clock::now();
-
-		ClientContext ctxA;
+        ClientContext ctxA;
         Empty respA;
         Status sA = stubA->SendMessage(&ctxA, msg, &respA);
 
-		auto end_a = std::chrono::steady_clock::now();
-        std::chrono::duration<double> elapsed_a = end_a - start_a;
-        std::string status_label_a = sA.ok() ? "OK" : "ERROR";
-
-        // Registra metricas do A
-        grpc_call_duration.Add({{"service", "ChatServer"}, {"method", "SendMessage"}, {"status", status_label_a}}, buckets).Observe(elapsed_a.count());
-        grpc_calls_total.Add({{"service", "ChatServer"}, {"method", "SendMessage"}, {"status", status_label_a}}).Increment();
-
-		if (!sA.ok()) {
-            std::cerr << "Failed to publish to Server A: " << sA.error_message() << std::endl;
+        if (!sA.ok()) {
+            std::cerr << "Failed to send to Server A: " << sA.error_message() << std::endl;
             return false;
-        } else {
-            std::cerr << "Publish to Server A succeeded." << std::endl;
         }
-
-        {
-            std::lock_guard<std::mutex> lock(messages_mutex);
-            forum_messages[msg.forum_id()].push_back({
-                msg.username(),
-                msg.text(),
-                std::time(nullptr)
-            });
-        }
-
-        std::cout << "Mensagem armazenada com sucesso\n";
         return true;
     }
 
-    void StartForumStream(const std::string& username, const std::string& forum_id) {
-        std::thread([this, username, forum_id]() {
-			auto start_stream = std::chrono::steady_clock::now();
+    std::string GetForumMessagesJson(const std::string& forum_id) {
+        ClientContext ctx;
+        HistoryRequest req;
+        req.set_forum_id(forum_id);
+        HistoryResponse resp;
 
-            ClientContext ctx;
-            JoinRequest req;
-            req.set_username(username);
-            req.set_forum_id(forum_id);
+        Status s = stubA->GetHistory(&ctx, req, &resp);
 
-            std::unique_ptr<ClientReader<Message>> reader = stubA->JoinForum(&ctx, req);
-            if (!reader) {
-                std::cerr << "[StartForumStream] reader is null immediately after JoinForum" << std::endl;
-                return;
-            }
-            std::cerr << "[StartForumStream] JoinForum returned reader; entering read loop." << std::endl;
+        std::ostringstream json;
+        json << "{\"success\":true,\"data\":[";
 
-            Message msg;
-            while (reader->Read(&msg)) {
-                std::lock_guard<std::mutex> lock(messages_mutex);
-                forum_messages[forum_id].push_back({
-                    msg.username(),
-                    msg.text(),
-                    std::time(nullptr)
-                });
-                std::cout << "[" << forum_id << "] " << msg.username() << ": " << msg.text() << std::endl;
-            }
-            Status status = reader->Finish();
-
-			auto end_stream = std::chrono::steady_clock::now();
-            std::chrono::duration<double> elapsed_stream = end_stream - start_stream;
-            std::string status_label = status.ok() ? "OK" : "ERROR";
-
-            // Registra metricas do Stream (Duracao total da conexao)
-            grpc_call_duration.Add({{"service", "ChatServer"}, {"method", "JoinForum"}, {"status", status_label}}, buckets).Observe(elapsed_stream.count());
-            grpc_calls_total.Add({{"service", "ChatServer"}, {"method", "JoinForum"}, {"status", status_label}}).Increment();
-
-
-			if (!status.ok()) {
-                std::cerr << "[StartForumStream] Stream finished with error: " << status.error_message()
-                          << " (code=" << status.error_code() << ")" << std::endl;
-            } else {
-                std::cerr << "[StartForumStream] Stream finished OK." << std::endl;
-            }
-        }).detach();
-    }
-
-    std::vector<std::map<std::string, std::string>> GetForumMessages(const std::string& forum_id) {
-        std::lock_guard<std::mutex> lock(messages_mutex);
-        std::vector<std::map<std::string, std::string>> result;
-
-        if (forum_messages.find(forum_id) != forum_messages.end()) {
-            for (const auto& msg : forum_messages[forum_id]) {
-                std::map<std::string, std::string> message_obj;
-                message_obj["id"] = std::to_string(msg.timestamp);
-                message_obj["username"] = msg.username;
-                message_obj["content"] = msg.text;
-                message_obj["timestamp"] = std::to_string(msg.timestamp);
-                result.push_back(message_obj);
+        if (s.ok()) {
+            for (int i = 0; i < resp.messages_size(); i++) {
+                const auto& m = resp.messages(i);
+                if (i > 0) json << ",";
+                json << "{\"username\":\"" << m.username() << "\","
+                     << "\"content\":\"" << m.text() << "\","
+                     << "\"timestamp\":\"" << m.timestamp() << "\"}";
             }
         }
-        return result;
+        json << "]}";
+        return json.str();
     }
 
 private:
-    struct ForumMessage {
-        std::string username;
-        std::string text;
-        std::time_t timestamp;
-    };
-
     std::unique_ptr<ChatServer::Stub> stubA;
     std::unique_ptr<Checker::Stub> stubB;
-    std::map<std::string, std::vector<ForumMessage>> forum_messages;
-    std::mutex messages_mutex;
 };
 
 class HTTPServer {
@@ -200,234 +106,155 @@ private:
     int server_fd;
     Central* central;
 
+    // Headers de Cache-Control para evitar cache no navegador
     std::string create_json_response(const std::string& content, int status_code = 200) {
         std::ostringstream response;
-        std::string status_text = (status_code == 200) ? "OK" : "Bad Request";
-
-        response << "HTTP/1.1 " << status_code << " " << status_text << "\r\n";
-        response << "Content-Type: application/json\r\n";
-        response << "Access-Control-Allow-Origin: *\r\n";
-        response << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n";
-        response << "Access-Control-Allow-Headers: Content-Type\r\n";
-        response << "Content-Length: " << content.length() << "\r\n";
-        response << "\r\n";
-        response << content;
-
+        response << "HTTP/1.1 " << status_code << " OK\r\n"
+                 << "Content-Type: application/json\r\n"
+                 << "Access-Control-Allow-Origin: *\r\n"
+                 << "Cache-Control: no-store, no-cache, must-revalidate\r\n" // Importante!
+                 << "Pragma: no-cache\r\n"
+                 << "Content-Length: " << content.length() << "\r\n\r\n"
+                 << content;
         return response.str();
     }
 
+    // Parser JSON que ignora espaços
     std::string parse_json_field(const std::string& json, const std::string& field) {
-        std::string search = "\"" + field + "\":\"";
-        size_t start = json.find(search);
-        if (start == std::string::npos) return "";
-        start += search.length();
-        size_t end = json.find("\"", start);
-        if (end == std::string::npos) return "";
-        return json.substr(start, end - start);
+        std::string key = "\"" + field + "\"";
+        size_t keyPos = json.find(key);
+        if (keyPos == std::string::npos) return "";
+
+        // Procura pelos dois pontos apos a chave
+        size_t colonPos = json.find(":", keyPos);
+        if (colonPos == std::string::npos) return "";
+
+        // Procura a aspa de abertura do valor
+        size_t startQuote = json.find("\"", colonPos);
+        if (startQuote == std::string::npos) return "";
+
+        // Procura a aspa de fechamento
+        size_t endQuote = json.find("\"", startQuote + 1);
+        if (endQuote == std::string::npos) return "";
+
+        return json.substr(startQuote + 1, endQuote - startQuote - 1);
     }
 
     void handle_request(int client_socket) {
-		auto start_http = std::chrono::steady_clock::now();
-
+        auto start = std::chrono::steady_clock::now();
         char buffer[4096] = {0};
         read(client_socket, buffer, 4096);
-
         std::string request(buffer);
-        std::istringstream request_stream(request);
-        std::string method, path, version;
-        request_stream >> method >> path >> version;
+        std::istringstream stream(request);
+        std::string method, path;
+        stream >> method >> path;
 
-		// Simplifica a rota removendo query params para o Prometheus
-        std::string route_label = path.substr(0, path.find('?'));
-
-        std::cout << "Request: " << method << " " << path << std::endl;
+        std::string path_only = path.substr(0, path.find('?'));
 
         if (method == "OPTIONS") {
-            std::string response = create_json_response("");
-            send(client_socket, response.c_str(), response.length(), 0);
-            close(client_socket);
-            return;
+             std::string r = create_json_response("");
+             send(client_socket, r.c_str(), r.length(), 0);
+             close(client_socket);
+             return;
         }
 
-		int status_code = 200;
+        if (method == "POST" && path == "/api/messages/send") {
+            size_t body_pos = request.find("\r\n\r\n");
+            if (body_pos != std::string::npos) {
+                std::string body = request.substr(body_pos + 4);
 
-        if (method == "POST" && path == "/api/forum/join") {
-            size_t body_start = request.find("\r\n\r\n");
-            if (body_start != std::string::npos) {
-                std::string body = request.substr(body_start + 4);
-                std::string username = parse_json_field(body, "username");
-                std::string forum_code = parse_json_field(body, "forumCode");
+                // Tenta buscar "forumCode", se falhar tenta "forum_id" (caso o front mande diferente)
+                std::string forum = parse_json_field(body, "forumCode");
+                if (forum.empty()) forum = parse_json_field(body, "forum_id");
 
-                if (!username.empty() && !forum_code.empty()) {
-                    std::cout << "User " << username << " joined forum " << forum_code << std::endl;
-					central->StartForumStream(username, forum_code);
+                std::string user = parse_json_field(body, "username");
+                std::string text = parse_json_field(body, "content");
 
-                    std::string json_response = "{\"success\":true,\"data\":{\"token\":\"user_" + username + "_" + forum_code + "\"}}";
-                    std::string response = create_json_response(json_response);
-                    send(client_socket, response.c_str(), response.length(), 0);
+                // Validação extra
+                if (forum.empty()) {
+                    std::cout << "AVISO: Recebido POST sem forumCode valido. Body: " << body << std::endl;
+                    send_json(client_socket, "{\"success\":false, \"error\":\"missing forumCode\"}", 400);
+                } else if (central->SendMessage(user, forum, text)) {
+                    send_json(client_socket, "{\"success\":true}");
                 } else {
-					status_code = 400;
-                    std::string json_response = "{\"success\":false,\"message\":\"Invalid request\"}";
-                    std::string response = create_json_response(json_response, 400);
-                    send(client_socket, response.c_str(), response.length(), 0);
+                    send_json(client_socket, "{\"success\":false}", 400);
                 }
             }
         }
-        else if (method == "POST" && path == "/api/messages/send") {
-            size_t body_start = request.find("\r\n\r\n");
-            if (body_start != std::string::npos) {
-                std::string body = request.substr(body_start + 4);
-                std::string username = parse_json_field(body, "username");
-                std::string forum_code = parse_json_field(body, "forumCode");
-                std::string content = parse_json_field(body, "content");
+        else if (method == "GET" && path.rfind("/api/messages", 0) == 0) {
+            size_t pos = path.find("forumCode=");
+            if (pos != std::string::npos) {
+                std::string forum = path.substr(pos + 10);
+                size_t end = forum.find('&');
+                if (end != std::string::npos) forum = forum.substr(0, end);
 
-                if (!username.empty() && !forum_code.empty() && !content.empty()) {
-                    chat::Message msg;
-                    msg.set_username(username);
-                    msg.set_forum_id(forum_code);
-                    msg.set_text(content);
+                // Remove espaços em branco ou quebras de linha residuais na URL
+                forum.erase(std::remove_if(forum.begin(), forum.end(), ::isspace), forum.end());
 
-                    bool success = central->SendMessage(msg);
-
-                    if (success) {
-                        std::string json_response = "{\"success\":true,\"data\":{\"id\":\"" + std::to_string(std::time(nullptr)) + "\",\"username\":\"" + username + "\",\"content\":\"" + content + "\",\"timestamp\":\"" + std::to_string(std::time(nullptr)) + "\"}}";
-                        std::string response = create_json_response(json_response);
-                        send(client_socket, response.c_str(), response.length(), 0);
-                    } else {
-						status_code = 400;
-                        std::string json_response = "{\"success\":false,\"message\":\"Message blocked or failed\"}";
-                        std::string response = create_json_response(json_response, 400);
-                        send(client_socket, response.c_str(), response.length(), 0);
-                    }
-                } else {
-					status_code = 400;
-                    std::string json_response = "{\"success\":false,\"message\":\"Invalid message\"}";
-                    std::string response = create_json_response(json_response, 400);
-                    send(client_socket, response.c_str(), response.length(), 0);
-                }
-            }
-        }
-        else if (method == "GET" && path.substr(0, 13) == "/api/messages") {
-            size_t query_start = path.find('?');
-            std::string forum_code;
-            if (query_start != std::string::npos) {
-                std::string query = path.substr(query_start + 1);
-                size_t forum_pos = query.find("forumCode=");
-                if (forum_pos != std::string::npos) {
-                    forum_pos += 10;
-                    size_t end_pos = query.find('&', forum_pos);
-                    if (end_pos == std::string::npos) end_pos = query.length();
-                    forum_code = query.substr(forum_pos, end_pos - forum_pos);
-                }
-            }
-
-            if (!forum_code.empty()) {
-                auto messages = central->GetForumMessages(forum_code);
-                std::ostringstream json_response;
-                json_response << "{\"success\":true,\"data\":[";
-
-                for (size_t i = 0; i < messages.size(); ++i) {
-                    if (i > 0) json_response << ",";
-                    json_response << "{\"id\":\"" << messages[i].at("timestamp") << "\","
-                                 << "\"username\":\"" << messages[i].at("username") << "\","
-                                 << "\"content\":\"" << messages[i].at("content") << "\","
-                                 << "\"timestamp\":\"" << messages[i].at("timestamp") << "\"}";
-                }
-
-                json_response << "]}";
-                std::string response = create_json_response(json_response.str());
-                send(client_socket, response.c_str(), response.length(), 0);
+                std::string json = central->GetForumMessagesJson(forum);
+                std::string resp = create_json_response(json);
+                send(client_socket, resp.c_str(), resp.length(), 0);
             } else {
-				status_code = 400;
-                std::string json_response = "{\"success\":false,\"message\":\"Missing forumCode parameter\"}";
-                std::string response = create_json_response(json_response, 400);
-                send(client_socket, response.c_str(), response.length(), 0);
+                send_json(client_socket, "{\"error\":\"missing forumCode\"}", 400);
             }
+        }
+        else if (method == "POST" && path == "/api/forum/join") {
+             send_json(client_socket, "{\"success\":true}");
         }
         else {
-			status_code = 400;
-            std::string json_response = "{\"success\":false,\"message\":\"Not found\"}";
-            std::string response = create_json_response(json_response, 404);
-            send(client_socket, response.c_str(), response.length(), 0);
+             send_json(client_socket, "{\"error\":\"not found\"}", 404);
         }
 
-		auto end_http = std::chrono::steady_clock::now();
-        std::chrono::duration<double> elapsed_http = end_http - start_http;
-
-        // Registra metrica HTTP
-        http_request_duration.Add({{"route", route_label}, {"method", method}, {"status", std::to_string(status_code)}}, buckets)
-            .Observe(elapsed_http.count());
+        auto end = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed = end - start;
+        http_request_duration.Add({{"method", method}, {"route", path_only}}, buckets).Observe(elapsed.count());
 
         close(client_socket);
     }
 
+    void send_json(int socket, std::string json, int code = 200) {
+        std::string r = create_json_response(json, code);
+        send(socket, r.c_str(), r.length(), 0);
+    }
+
 public:
     HTTPServer(Central* c) : central(c) {}
-
-    void start(int port = 8080) {
+    void start(int port) {
         server_fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (server_fd == -1) {
-            std::cerr << "Failed to create socket" << std::endl;
-            return;
-        }
-
         int opt = 1;
         setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port);
+        bind(server_fd, (struct sockaddr*)&addr, sizeof(addr));
+        listen(server_fd, 10);
 
-        struct sockaddr_in address;
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = INADDR_ANY;
-        address.sin_port = htons(port);
-
-        if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-            std::cerr << "Bind failed" << std::endl;
-            return;
-        }
-
-        if (listen(server_fd, 10) < 0) {
-            std::cerr << "Listen failed" << std::endl;
-            return;
-        }
-
-		// INICIA O SERVIDOR DE METRICAS (PROMETHEUS)
         prometheus::Exposer exposer("0.0.0.0:8000");
         exposer.RegisterCollectable(registry);
-        std::cout << "Prometheus Metrics Exposer running on 0.0.0.0:8000/metrics" << std::endl;
 
-        std::cout << "HTTP Server listening on port " << port << std::endl;
-
-        while (true) {
-            struct sockaddr_in client_addr;
-            socklen_t client_len = sizeof(client_addr);
-            int client_socket = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
-
-            if (client_socket < 0) {
-                std::cerr << "Accept failed" << std::endl;
-                continue;
-            }
-
-            std::thread(&HTTPServer::handle_request, this, client_socket).detach();
+        std::cout << "Central running on 8080. Metrics on 8000." << std::endl;
+        while(true) {
+            struct sockaddr_in cli; socklen_t len = sizeof(cli);
+            int sock = accept(server_fd, (struct sockaddr*)&cli, &len);
+            if (sock >= 0) std::thread(&HTTPServer::handle_request, this, sock).detach();
         }
     }
 };
 
 int main() {
-    std::string serverAAddr = std::getenv("SERVER_A_ADDRESS") ? std::getenv("SERVER_A_ADDRESS") : "localhost:50051";
-    std::string serverBAddr = std::getenv("SERVER_B_ADDRESS") ? std::getenv("SERVER_B_ADDRESS") : "localhost:50052";
+    std::string sA = "dns:///servera.chat-system.svc.cluster.local:50051";
+    std::string sB = "dns:///serverb.chat-system.svc.cluster.local:50052";
+
+    if (std::getenv("SERVER_A_ADDRESS")) sA = std::getenv("SERVER_A_ADDRESS");
+    if (std::getenv("SERVER_B_ADDRESS")) sB = std::getenv("SERVER_B_ADDRESS");
 
     Central central(
-        grpc::CreateChannel(serverAAddr, grpc::InsecureChannelCredentials()),
-        grpc::CreateChannel(serverBAddr, grpc::InsecureChannelCredentials())
+        grpc::CreateChannel(sA, grpc::InsecureChannelCredentials()),
+        grpc::CreateChannel(sB, grpc::InsecureChannelCredentials())
     );
 
-    HTTPServer server(&central);
-    std::cout << "Starting Central Server..." << std::endl;
-    std::cout << "gRPC clients connected to:" << std::endl;
-    std::cout << "  - Server A: " << serverAAddr << std::endl;
-    std::cout << "  - Server B: " << serverBAddr << std::endl;
-    std::cout << "HTTP API available at: http://0.0.0.0:8080" << std::endl;
-
-    server.start(8080);
+    HTTPServer srv(&central);
+    srv.start(8080);
     return 0;
 }
-

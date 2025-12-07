@@ -19,5 +19,5 @@ spec:
         image: servera:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 50052
+        - containerPort: 50051
         - containerPort: 8000

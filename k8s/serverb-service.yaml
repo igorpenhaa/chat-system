@@ -6,9 +6,9 @@ metadata:
   labels:
     app: serverb
 spec:
+  clusterIP: None
   selector:
     app: serverb
-  type: ClusterIP
   ports:
     - name: grpc
       protocol: TCP

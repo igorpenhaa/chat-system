@@ -14,7 +14,6 @@ REQUEST_COUNT = Counter(
     ['result']  # Rotulo para diferenciar 'allowed' e 'blocked'
 )
 
-# Sumario para rastrear a latencia do processamento (opcional, mas util)
 CHECK_LATENCY = Summary(
     'checker_latency_seconds',
     'Latência de processamento da função CheckMessage'

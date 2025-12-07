@@ -14,8 +14,8 @@ kubectl create namespace monitoring
 # 4) Build no host mesmo
 docker build -t central:latest ./central
 docker build -t frontend:latest ./frontend
-docker build -t servera:latest ./servera
-docker build -t serverb:latest ./serverb
+docker build -t servera:latest ./serverA
+docker build -t serverb:latest ./serverB
 
 # 5) Load no minikube, isso pode demorar BASTANTE
 minikube image load central:latest
@@ -27,6 +27,10 @@ minikube image load serverb:latest
 minikube image list
 
 # 7) Aplicação dos Manifestos K8S (Serviços e Deployments)
+
+# Primeiro subimos o Redis para ele estar pronto quando o Server A iniciar ===
+kubectl apply -f k8s/redis.yaml -n chat-system
+
 # Aplica services:
 kubectl apply -f k8s/servera-service.yaml -n chat-system
 kubectl apply -f k8s/serverb-service.yaml -n chat-system
