@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: serverb
+  namespace: chat-system
+  labels:
+    app: serverb
+spec:
+  clusterIP: None
+  selector:
+    app: serverb
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 50052
+      targetPort: 50052
+    - name: metrics
+      protocol: TCP
+      port: 8000
+      targetPort: 8000

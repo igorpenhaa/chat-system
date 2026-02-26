@@ -1,0 +1,81 @@
+# 1) Limpeza total (Garante um ambiente limpo)
+kubectl delete namespace chat-system --ignore-not-found=true
+kubectl delete namespace monitoring --ignore-not-found=true
+minikube stop
+minikube delete
+
+# 2) Inicia o cluster Minikube (com pelo menos 2 Workers para elasticidade futura)
+minikube start --nodes 3 --driver=docker
+
+# 3) Cria o namespace da aplicação
+kubectl create namespace chat-system
+kubectl create namespace monitoring
+
+# 4) Build no host mesmo
+docker build -t central:latest ./central
+docker build -t frontend:latest ./frontend
+docker build -t servera:latest ./serverA
+docker build -t serverb:latest ./serverB
+
+# 5) Load no minikube, isso pode demorar BASTANTE
+minikube image load central:latest
+minikube image load frontend:latest
+minikube image load servera:latest
+minikube image load serverb:latest
+
+# 6) Opcional: Verificar se as imagens foram buildadas no Minikube
+minikube image list
+
+# 7) Aplicação dos Manifestos K8S (Serviços e Deployments)
+
+# Primeiro subimos o Redis para ele estar pronto quando o Server A iniciar ===
+kubectl apply -f k8s/redis.yaml -n chat-system
+
+# Aplica services:
+kubectl apply -f k8s/servera-service.yaml -n chat-system
+kubectl apply -f k8s/serverb-service.yaml -n chat-system
+kubectl apply -f k8s/central-service.yaml -n chat-system
+kubectl apply -f k8s/front-service.yaml -n chat-system
+# Aplica deployments:
+kubectl apply -f k8s/servera-deployment.yaml -n chat-system
+kubectl apply -f k8s/serverb-deployment.yaml -n chat-system
+kubectl apply -f k8s/central-deployment.yaml -n chat-system
+kubectl apply -f k8s/front-deployment.yaml -n chat-system
+
+
+# INSTALAÇÃO DO MONITORAMENTO (PROMETHEUS/GRAFANA)
+
+# 8) Cria o namespace de monitoramento
+
+# 9) Configuração e instalação do Kube-Prometheus-Stack via Helm
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install kube-prom prometheus-community/kube-prometheus-stack --namespace monitoring
+# Aguarde alguns minutos até que os pods do monitoring subam (use kubectl get pods -n monitoring)
+
+# 10) Aplicação do ServiceMonitor (Conecta o Prometheus ao Server B)
+kubectl apply -f k8s/serverb-servicemonitor.yaml
+kubectl apply -f k8s/servera-servicemonitor.yaml
+kubectl apply -f k8s/central-servicemonitor.yaml
+
+# =======================================================
+# PARTE 4: VALIDAÇÃO E ACESSO
+# =======================================================
+
+# 11) Verifica o status dos pods
+echo "Verificando pods do CHAT SYSTEM..."
+kubectl get pods -n chat-system -o wide
+echo "Verificando pods do MONITORING..."
+kubectl get pods -n monitoring -o wide
+
+# 12) Acessar o Frontend (Aplicação)
+minikube service frontend -n chat-system
+
+# 13) Acessar o Grafana (Monitoramento)
+echo "Senha do Grafana:"
+kubectl get secret --namespace monitoring kube-prom-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+# Encaminhar porta do Grafana para acesso local (http://localhost:3000)
+kubectl port-forward svc/kube-prom-grafana 3000:80 --namespace monitoring
+
+# 14) Acessar o Prometheus UI (Verificar Targets)
+kubectl port-forward prometheus-kube-prom-kube-prometheus-prometheus-0 9090:9090 --namespace monitoring

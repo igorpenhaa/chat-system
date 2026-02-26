@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servera
+  namespace: chat-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: servera
+  template:
+    metadata:
+      labels:
+        app: servera
+        prometheus: "true"
+    spec:
+      containers:
+      - name: servera
+        image: servera:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 50051
+        - containerPort: 8000

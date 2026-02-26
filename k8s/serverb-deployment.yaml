@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: serverb
+  namespace: chat-system
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: serverb
+  template:
+    metadata:
+      labels:
+        app: serverb
+        prometheus: "true"
+    spec:
+      containers:
+      - name: serverb
+        image: serverb:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 50052
+        - containerPort: 8000
+

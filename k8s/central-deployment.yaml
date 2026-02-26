@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: central
+  namespace: chat-system
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: central
+  template:
+    metadata:
+      labels:
+        app: central
+        prometheus: "true"
+    spec:
+      containers:
+        - name: central
+          image: central:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+            - containerPort: 8000
+          env:
+            - name: SERVER_A_ADDRESS
+              value: "dns:///servera.chat-system.svc.cluster.local:50051"
+            - name: SERVER_B_ADDRESS
+              value: "dns:///serverb.chat-system.svc.cluster.local:50052"
