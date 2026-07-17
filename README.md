@@ -1,16 +1,36 @@
-# Chat System gRPC - Simplificado
+# Chat System - Plataforma de microsserviços gRPC distribuída com observabilidade no Kubernetes
 
-Este projeto é um exemplo de chat distribuído usando gRPC, com uma **central C++**, um **server A em Node.js** e um **server B em Python**.
+Este projeto demonstra a implantação, instrumentação e avaliação de desempenho de uma arquitetura de microsserviços distribuída, executada em um cluster Kubernetes com múltiplos nós.
 
-O fluxo é:
+O sistema é composto por:
 
-1. O **front-end** envia requisições para a **central**.
-2. A **central** distribui a requisição:
+- Gateway de API em C++ (sem estado)
+- Serviço de mensagens em Node.js
+- Serviço de moderação de conteúdo em Python
+- Redis para estado compartilhado
+- Frontend em React
+- Prometheus + Grafana para observabilidade
+- Locust para testes de carga
 
-   * Para o **server A (Node.js)** que mantém os fóruns e mensagens.
-   * Para o **server B (Python)** que checa mensagens sensíveis.
-3. O **server B** retorna aprovação ou bloqueio da mensagem.
-4. O **server A** envia a mensagem para todos os usuários conectados.
+---
+
+## Arquitetura
+
+```
+Client
+   ↓
+React Frontend
+   ↓
+C++ Central (Stateless API Gateway)
+   ↓
+gRPC
+   ↓
+Server A (Node.js - Messaging)
+   ↓
+Redis (Shared State)
+   ↑
+Server B (Python - Content Moderation)
+```
 
 ---
 
@@ -64,7 +84,7 @@ pip install grpcio grpcio-tools
 
 ---
 
-## Passo a passo para rodar
+## Passo a passo para rodar sem kubernets
 
 ### 1 - Gerar arquivos gRPC / Protobuf
 
@@ -130,12 +150,9 @@ npm run dev
 
 ---
 
-### 4 - Testando
+## Passo a passo com Kubernets
 
-* Digite o nome do usuário, fórum e mensagens no Front-End.
-* O server B checa conteúdo sensível.
-* O server A mantém os fóruns e envia mensagens.
-* Mensagens bloqueadas pelo checker serão informadas no terminal.
+Seguir o how-to-run.txt, além de ter a aplicação funcional também terá acesso ao prometheus e ao grafana para monitorar a aplicação rodando
 
 ---
 

@@ -78,9 +78,4 @@ kubectl get secret --namespace monitoring kube-prom-grafana -o jsonpath="{.data.
 kubectl port-forward svc/kube-prom-grafana 3000:80 --namespace monitoring
 
 # 14) Acessar o Prometheus UI (Verificar Targets)
-# Encaminhar porta do Prometheus para acesso local (http://localhost:9090)
-echo "Senha do Grafana:"
-kubectl get secret --namespace monitoring kube-prom-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
-# Encaminhar porta do Grafana para acesso local (http://localhost:3000)
-kubectl port-forward svc/kube-prom-grafana 3000:80 --namespace monitoring
 kubectl port-forward prometheus-kube-prom-kube-prometheus-prometheus-0 9090:9090 --namespace monitoring
